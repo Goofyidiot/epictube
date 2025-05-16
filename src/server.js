@@ -5,6 +5,7 @@ const path = require('path');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const session = require('express-session');
+const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,11 +48,6 @@ const profilePicUpload = multer.diskStorage({
 });
 const uploadProfilePic = multer({ storage: profilePicUpload });
 
-// Helper: get user file path
-function getUserFile(username) {
-  return path.join(USERS_DIR, username + '.txt');
-}
-
 // Helper: get video score
 function getVideoScore(id) {
   const vfile = path.join(DATA_DIR, id + '.votes.txt');
@@ -66,10 +62,11 @@ function getVideoScore(id) {
 app.post('/api/register', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Missing fields' });
-  if (fs.existsSync(getUserFile(username))) return res.status(409).json({ error: 'User exists' });
+  const exists = db.prepare('SELECT 1 FROM users WHERE username = ?').get(username);
+  if (exists) return res.status(409).json({ error: 'User exists' });
   const hash = await bcrypt.hash(password, 10);
-  const user = { username, password: hash, description: '', profilePic: '', videos: [] };
-  fs.writeFileSync(getUserFile(username), JSON.stringify(user));
+  db.prepare('INSERT INTO users (username, password, description, profilePic) VALUES (?, ?, ?, ?)')
+    .run(username, hash, '', '');
   req.session.user = username;
   res.json({ username });
 });
@@ -77,8 +74,8 @@ app.post('/api/register', async (req, res) => {
 // Login
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
-  if (!fs.existsSync(getUserFile(username))) return res.status(404).json({ error: 'User not found' });
-  const user = JSON.parse(fs.readFileSync(getUserFile(username), 'utf-8'));
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  if (!user) return res.status(404).json({ error: 'User not found' });
   if (!(await bcrypt.compare(password, user.password))) return res.status(401).json({ error: 'Invalid password' });
   req.session.user = username;
   res.json({ username });
@@ -92,22 +89,23 @@ app.post('/api/logout', (req, res) => {
 // Get current user
 app.get('/api/me', (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
-  const user = JSON.parse(fs.readFileSync(getUserFile(req.session.user), 'utf-8'));
-  res.json({ username: user.username, description: user.description, profilePic: user.profilePic });
+  const user = db.prepare('SELECT username, description, profilePic FROM users WHERE username = ?').get(req.session.user);
+  res.json(user);
 });
 
 // Update profile (support image upload)
 app.post('/api/me', uploadProfilePic.single('profilePicFile'), (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
-  const user = JSON.parse(fs.readFileSync(getUserFile(req.session.user), 'utf-8'));
-  user.description = req.body.description || user.description;
-  // If a new image was uploaded, update profilePic to the new file URL
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(req.session.user);
+  const description = req.body.description || user.description;
+  let profilePic = user.profilePic;
   if (req.file) {
-    user.profilePic = '/profilepics/' + req.file.filename;
+    profilePic = '/profilepics/' + req.file.filename;
   } else if (req.body.profilePic) {
-    user.profilePic = req.body.profilePic;
+    profilePic = req.body.profilePic;
   }
-  fs.writeFileSync(getUserFile(user.username), JSON.stringify(user));
+  db.prepare('UPDATE users SET description = ?, profilePic = ? WHERE username = ?')
+    .run(description, profilePic, req.session.user);
   res.json({ ok: true });
 });
 
@@ -116,7 +114,7 @@ app.post('/api/delete-account', (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
   const username = req.session.user;
   // Delete user's videos
-  const user = JSON.parse(fs.readFileSync(getUserFile(username), 'utf-8'));
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   user.videos.forEach(id => {
     const vfile = path.join(DATA_DIR, id + '.txt');
     const vdata = fs.existsSync(vfile) ? JSON.parse(fs.readFileSync(vfile, 'utf-8')) : null;
@@ -130,32 +128,21 @@ app.post('/api/delete-account', (req, res) => {
     const vvotes = path.join(DATA_DIR, id + '.votes.txt');
     if (fs.existsSync(vvotes)) fs.unlinkSync(vvotes);
   });
-  // Delete user file
-  fs.unlinkSync(getUserFile(username));
+  // Delete user from database
+  db.prepare('DELETE FROM users WHERE username = ?').run(username);
   req.session.destroy(() => res.json({ ok: true }));
 });
 
 // List videos
 app.get('/api/videos', (req, res) => {
-  fs.readdir(DATA_DIR, (err, files) => {
-    if (err) return res.status(500).json({ error: 'Failed to read data directory' });
-    const videos = files.filter(f => f.endsWith('.txt') && !f.endsWith('.votes.txt')).map(f => {
-      const content = fs.readFileSync(path.join(DATA_DIR, f), 'utf-8');
-      const video = JSON.parse(content);
-      video.score = getVideoScore(video.id);
-      return video;
-    });
-    res.json(videos);
-  });
+  const videos = db.prepare('SELECT *, (SELECT IFNULL(SUM(vote),0) FROM votes WHERE videoId = videos.id) as score FROM videos').all();
+  res.json(videos);
 });
 
 // Get single video metadata
 app.get('/api/videos/:id', (req, res) => {
-  const file = path.join(DATA_DIR, req.params.id + '.txt');
-  if (!fs.existsSync(file)) return res.status(404).json({ error: 'Video not found' });
-  const content = fs.readFileSync(file, 'utf-8');
-  const video = JSON.parse(content);
-  video.score = getVideoScore(video.id);
+  const video = db.prepare('SELECT *, (SELECT IFNULL(SUM(vote),0) FROM votes WHERE videoId = videos.id) as score FROM videos WHERE id = ?').get(req.params.id);
+  if (!video) return res.status(404).json({ error: 'Video not found' });
   res.json(video);
 });
 
@@ -164,20 +151,9 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
   const { title, description } = req.body;
   if (!req.file) return res.status(400).json({ error: 'No video file uploaded' });
-  const videoMeta = {
-    id: Date.now().toString(),
-    title,
-    description,
-    filename: req.file.filename,
-    url: `/videos/${req.file.filename}`,
-    owner: req.session.user
-  };
-  fs.writeFileSync(path.join(DATA_DIR, videoMeta.id + '.txt'), JSON.stringify(videoMeta));
-  // Add video to user's list
-  const userFile = path.join(__dirname, '../users', req.session.user + '.txt');
-  const user = JSON.parse(fs.readFileSync(userFile, 'utf-8'));
-  user.videos.push(videoMeta.id);
-  fs.writeFileSync(userFile, JSON.stringify(user));
+  const stmt = db.prepare('INSERT INTO videos (title, description, filename, url, owner) VALUES (?, ?, ?, ?, ?)');
+  const info = stmt.run(title, description, req.file.filename, `/videos/${req.file.filename}`, req.session.user);
+  const videoMeta = db.prepare('SELECT * FROM videos WHERE id = ?').get(info.lastInsertRowid);
   res.json(videoMeta);
 });
 
@@ -194,10 +170,10 @@ app.post('/api/videos/:id/delete', (req, res) => {
   // Remove video metadata
   fs.unlinkSync(file);
   // Remove from user's list
-  const userFile = path.join(__dirname, '../users', req.session.user + '.txt');
-  const user = JSON.parse(fs.readFileSync(userFile, 'utf-8'));
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(req.session.user);
   user.videos = user.videos.filter(id => id !== req.params.id);
-  fs.writeFileSync(userFile, JSON.stringify(user));
+  db.prepare('UPDATE users SET videos = ? WHERE username = ?')
+    .run(JSON.stringify(user.videos), req.session.user);
   // Remove comments
   const cfile = path.join(COMMENTS_DIR, req.params.id + '.txt');
   if (fs.existsSync(cfile)) fs.unlinkSync(cfile);
@@ -222,61 +198,59 @@ app.post('/api/videos/:id/edit', (req, res) => {
 
 // Comments API
 app.get('/api/videos/:id/comments', (req, res) => {
-  const file = path.join(COMMENTS_DIR, req.params.id + '.txt');
-  if (!fs.existsSync(file)) return res.json([]);
-  const content = fs.readFileSync(file, 'utf-8');
-  res.json(JSON.parse(content));
+  const comments = db.prepare('SELECT * FROM comments WHERE videoId = ? ORDER BY id ASC').all(req.params.id);
+  res.json(comments);
 });
 
 // Comments API (authenticated)
 app.post('/api/videos/:id/comments', (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
-  const file = path.join(COMMENTS_DIR, req.params.id + '.txt');
-  let comments = [];
-  if (fs.existsSync(file)) {
-    comments = JSON.parse(fs.readFileSync(file, 'utf-8'));
-  }
-  const userFile = path.join(__dirname, '../users', req.session.user + '.txt');
-  const user = JSON.parse(fs.readFileSync(userFile, 'utf-8'));
-  const comment = {
-    id: Date.now().toString(),
-    user: req.session.user,
-    profilePic: user.profilePic,
-    text: req.body.text,
-    timestamp: new Date().toISOString()
-  };
-  comments.push(comment);
-  fs.writeFileSync(file, JSON.stringify(comments));
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(req.session.user);
+  const stmt = db.prepare('INSERT INTO comments (videoId, user, profilePic, text, timestamp) VALUES (?, ?, ?, ?, ?)');
+  const info = stmt.run(
+    req.params.id,
+    req.session.user,
+    user.profilePic,
+    req.body.text,
+    new Date().toISOString()
+  );
+  const comment = db.prepare('SELECT * FROM comments WHERE id = ?').get(info.lastInsertRowid);
   res.json(comment);
 });
 
 // Voting System
 // Get votes for a video
 app.get('/api/videos/:id/votes', (req, res) => {
-  const vfile = path.join(DATA_DIR, req.params.id + '.votes.txt');
-  if (!fs.existsSync(vfile)) return res.json({ score: 0, userVote: 0 });
-  const votes = JSON.parse(fs.readFileSync(vfile, 'utf-8'));
+  const votes = db.prepare('SELECT user, vote FROM votes WHERE videoId = ?').all(req.params.id);
   let score = 0;
-  for (const v of Object.values(votes)) score += v;
   let userVote = 0;
-  if (req.session.user && votes[req.session.user]) userVote = votes[req.session.user];
+  for (const v of votes) {
+    score += v.vote;
+    if (req.session.user && v.user === req.session.user) userVote = v.vote;
+  }
   res.json({ score, userVote });
 });
 
 // Vote on a video (upvote: 1, downvote: -1, remove: 0)
 app.post('/api/videos/:id/votes', (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
-  const vfile = path.join(DATA_DIR, req.params.id + '.votes.txt');
-  let votes = {};
-  if (fs.existsSync(vfile)) votes = JSON.parse(fs.readFileSync(vfile, 'utf-8'));
   const { vote } = req.body; // 1, -1, or 0
   if (![1, -1, 0].includes(vote)) return res.status(400).json({ error: 'Invalid vote' });
-  if (vote === 0) delete votes[req.session.user];
-  else votes[req.session.user] = vote;
-  fs.writeFileSync(vfile, JSON.stringify(votes));
+  if (vote === 0) {
+    db.prepare('DELETE FROM votes WHERE videoId = ? AND user = ?').run(req.params.id, req.session.user);
+  } else {
+    db.prepare('INSERT INTO votes (videoId, user, vote) VALUES (?, ?, ?) ON CONFLICT(videoId, user) DO UPDATE SET vote = excluded.vote')
+      .run(req.params.id, req.session.user, vote);
+  }
+  // Return updated score and userVote
+  const votes = db.prepare('SELECT user, vote FROM votes WHERE videoId = ?').all(req.params.id);
   let score = 0;
-  for (const v of Object.values(votes)) score += v;
-  res.json({ score, userVote: votes[req.session.user] || 0 });
+  let userVote = 0;
+  for (const v of votes) {
+    score += v.vote;
+    if (req.session.user && v.user === req.session.user) userVote = v.vote;
+  }
+  res.json({ score, userVote });
 });
 
 // Serve index.html for root
