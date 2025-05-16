@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EpicTube - Account</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: minecraft, Arial, sans-serif; background: #101a2b; color: #fff; margin: 0; padding: 0; }
+    nav { background:#17305c;padding:0.7rem 2rem;display:flex;align-items:center;gap:1.5rem; }
+    nav a { color:#2196f3;text-decoration:none;font-weight:700;font-size:1.1rem; }
+    nav a[href="/account.html"] { color:#fff; }
+    .container { max-width: 500px; margin: 2rem auto; padding: 2rem; background: #17305c; border-radius: 12px; box-shadow: 0 2px 12px #0003; }
+    h2, h3 { color: #2196f3; margin-bottom: 1rem; margin-top: 0; }
+    label { display: block; text-align: left; margin: 0.5rem 0 0.2rem 0; font-weight: 700; color: #b3c6e0; }
+    input, textarea { width: 100%; padding: 0.6rem; border-radius: 6px; border: none; background: #101a2b; color: #fff; font-size: 1rem; margin-bottom: 1rem; box-sizing: border-box; }
+    button { background: #2196f3; color: #fff; border: none; padding: 0.7rem 2rem; border-radius: 6px; font-size: 1rem; font-weight: 700; cursor: pointer; transition: background 0.2s; margin-top: 0.5rem; }
+    button:hover { background: #1769aa; }
+    #profileSection { text-align: center; }
+    #profileSection img { width: 64px; height: 64px; border-radius: 50%; background: #101a2b; object-fit: cover; margin-bottom: 1rem; }
+    #deleteAccountBtn { background: #e53935; margin-top: 1rem; }
+    #loginSection { text-align: center; }
+  </style>
+</head>
+<body>
+  <nav style="background:#17305c;padding:0.7rem 2rem;display:flex;align-items:center;gap:1.5rem;justify-content:space-between;">
+    <div style="display:flex;align-items:center;gap:1.5rem;">
+      <button onclick="window.location.href='/'" style="background:#2196f3;color:#fff;border:none;padding:0.5rem 1.3rem;border-radius:8px;font-weight:700;font-size:1.1rem;cursor:pointer;transition:background 0.2s;">EpicTube</button>
+      <a href="/" style="color:#2196f3;text-decoration:none;font-weight:700;font-size:1.1rem;">Home</a>
+      <a href="/manager.html" style="color:#2196f3;text-decoration:none;font-weight:700;font-size:1.1rem;">My Videos</a>
+      <a href="/account.html" style="color:#2196f3;text-decoration:none;font-weight:700;font-size:1.1rem;">Account</a>
+    </div>
+    <div id="profileNav" style="position:relative;display:flex;align-items:center;gap:0.7rem;"></div>
+  </nav>
+  <div class="container">
+    <div id="loginSection">
+      <h2>Login</h2>
+      <form id="loginForm">
+        <label>Username</label>
+        <input type="text" name="username" required>
+        <label>Password</label>
+        <input type="password" name="password" required>
+        <button type="submit">Login</button>
+      </form>
+      <h3>Or Register</h3>
+      <form id="registerForm">
+        <label>Username</label>
+        <input type="text" name="username" required>
+        <label>Password</label>
+        <input type="password" name="password" required>
+        <button type="submit">Register</button>
+      </form>
+    </div>
+    <div id="profileSection" style="display:none;">
+      <img id="profilePicImg" src="">
+      <div style="font-size:1.2rem;font-weight:700;" id="profileUsername"></div>
+      <div id="voteBar" style="margin:1rem 0;"></div>
+      <form id="profileForm" style="margin-top:1rem;">
+        <label>Profile Description</label>
+        <textarea id="profileDesc" name="description" rows="2"></textarea>
+        <label>Profile Picture URL</label>
+        <input type="url" name="profilePic" placeholder="Paste image URL">
+        <button type="submit">Update Profile</button>
+      </form>
+      <button id="logoutBtn">Logout</button>
+      <button id="deleteAccountBtn">Delete Account</button>
+    </div>
+  </div>
+  <script>
+    async function getMe() {
+      try {
+        const res = await fetch('/api/me');
+        if (!res.ok) return null;
+        return await res.json();
+      } catch { return null; }
+    }
+    async function renderVoteBar() {
+      const voteBar = document.getElementById('voteBar');
+      const videoId = window.location.hash.replace('#','') || null;
+      if (!videoId) { voteBar.innerHTML = ''; return; }
+      const res = await fetch(`/api/videos/${videoId}/votes`);
+      const data = await res.json();
+      let { score, userVote } = data;
+      voteBar.innerHTML = `
+        <button id="likeBtn" style="background:none;border:none;color:${userVote===1?'#4cafef':'#b3c6e0'};font-size:1.5rem;cursor:pointer;">👍</button>
+        <span id="voteScore" style="min-width:2.5em;display:inline-block;text-align:center;font-weight:700;color:#2196f3;">${score}</span>
+        <button id="dislikeBtn" style="background:none;border:none;color:${userVote===-1?'#e53935':'#b3c6e0'};font-size:1.5rem;cursor:pointer;">👎</button>
+      `;
+      document.getElementById('likeBtn').onclick = async () => {
+        let newVote = userVote === 1 ? 0 : 1;
+        const res = await fetch(`/api/videos/${videoId}/votes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vote: newVote })
+        });
+        if (res.ok) renderVoteBar();
+      };
+      document.getElementById('dislikeBtn').onclick = async () => {
+        let newVote = userVote === -1 ? 0 : -1;
+        const res = await fetch(`/api/videos/${videoId}/votes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vote: newVote })
+        });
+        if (res.ok) renderVoteBar();
+      };
+    }
+    async function showProfile() {
+      const me = await getMe();
+      if (!me) {
+        document.getElementById('profileSection').style.display = 'none';
+        document.getElementById('loginSection').style.display = '';
+        return;
+      }
+      document.getElementById('profileSection').style.display = '';
+      document.getElementById('loginSection').style.display = 'none';
+      document.getElementById('profileUsername').textContent = me.username;
+      document.getElementById('profileDesc').value = me.description || '';
+      document.getElementById('profilePicImg').src = me.profilePic || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(me.username);
+      renderVoteBar();
+    }
+    showProfile();
+    document.getElementById('registerForm').onsubmit = async e => {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData(e.target));
+      const res = await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (res.ok) { showProfile(); } else { alert('Registration failed'); }
+    };
+    document.getElementById('loginForm').onsubmit = async e => {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData(e.target));
+      const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (res.ok) { showProfile(); } else { alert('Login failed'); }
+    };
+    document.getElementById('logoutBtn').onclick = async () => {
+      await fetch('/api/logout', { method: 'POST' });
+      showProfile();
+    };
+    document.getElementById('profileForm').onsubmit = async e => {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData(e.target));
+      await fetch('/api/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      showProfile();
+    };
+    document.getElementById('deleteAccountBtn').onclick = async () => {
+      if (confirm('Are you sure you want to delete your account? This cannot be undone.')) {
+        await fetch('/api/delete-account', { method: 'POST' });
+        showProfile();
+      }
+    };
+  </script>
+</body>
+</html>
