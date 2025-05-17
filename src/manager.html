@@ -207,14 +207,25 @@
     document.getElementById('uploadForm').onsubmit = async (e) => {
       e.preventDefault();
       const form = e.target;
+      const msg = document.getElementById('uploadMsg');
+      msg.style.color = '#b3c6e0';
+      msg.textContent = 'Uploading...';
       const data = new FormData(form);
-      const res = await fetch('/api/upload', { method: 'POST', body: data });
-      if (res.ok) {
-        form.reset();
-        document.getElementById('uploadMsg').textContent = 'Upload successful!';
-        fetchMyVideos();
-      } else {
-        document.getElementById('uploadMsg').textContent = 'Upload failed.';
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: data });
+        const result = await res.json().catch(() => ({}));
+        if (res.ok) {
+          form.reset();
+          msg.style.color = '#4caf50';
+          msg.textContent = 'Upload successful!';
+          fetchMyVideos();
+        } else {
+          msg.style.color = '#e53935';
+          msg.textContent = 'Upload failed: ' + (result.error || res.statusText);
+        }
+      } catch (err) {
+        msg.style.color = '#e53935';
+        msg.textContent = 'Upload failed: Network error.';
       }
     };
     fetchMyVideos();

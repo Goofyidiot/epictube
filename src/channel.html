@@ -83,7 +83,12 @@
     async function fetchChannel() {
       const res = await fetch(`/api/channel/${encodeURIComponent(username)}`);
       if (!res.ok) {
-        document.body.innerHTML = '<h2 style="color:#e53935;text-align:center;">Channel not found.</h2>';
+        document.body.innerHTML = `
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;">
+            <h2 style="color:#e53935;text-align:center;">Channel not found.</h2>
+            <a href="/" style="margin-top:2rem;background:#2196f3;color:#fff;padding:0.8rem 2.2rem;border-radius:8px;font-size:1.1rem;font-weight:700;text-decoration:none;box-shadow:0 2px 8px #0002;">Back to Home</a>
+          </div>
+        `;
         return;
       }
       channelData = await res.json();
