@@ -733,6 +733,7 @@
           <img src="${imgSrc}" class="profile-nav-img" alt="Profile">
           <span>${me.username}</span>
         </button>
+        <a href="/channel.html?user=${encodeURIComponent(me.username)}" class="profile-nav-btn" style="background:#1769aa;">My Channel</a>
         <div class="profile-dropdown" id="profileDropdown">
           <a href="/account.html">Account Management</a>
           <a href="#" id="logoutNavBtn">Logout</a>

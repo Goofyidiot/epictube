@@ -30,6 +30,9 @@
   </style>
 </head>
 <body>
+  <nav style="background:#17305c;padding:1rem 0 0.5rem 0;margin-bottom:1.5rem;box-shadow:0 2px 8px #0002;border-radius:0 0 10px 10px;display:flex;justify-content:flex-end;">
+    <button id="myChannelBtn" style="display:none;background:#2196f3;color:#fff;border:none;padding:0.5rem 1.2rem;border-radius:5px;font-size:1rem;font-weight:700;cursor:pointer;margin-right:1.5rem;">My Channel</button>
+  </nav>
   <div class="container">
     <div class="channel-header">
       <img id="channelPic" class="channel-pic" src="" alt="Profile Picture">
@@ -64,6 +67,18 @@
         return await res.json();
       } catch { return null; }
     }
+
+    // Show "My Channel" button if logged in
+    (async function showMyChannelBtn() {
+      const me = await getMe();
+      if (me && me.username) {
+        const btn = document.getElementById('myChannelBtn');
+        btn.style.display = '';
+        btn.onclick = () => {
+          window.location = '/channel.html?user=' + encodeURIComponent(me.username);
+        };
+      }
+    })();
 
     async function fetchChannel() {
       const res = await fetch(`/api/channel/${encodeURIComponent(username)}`);
