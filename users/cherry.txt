@@ -1,1 +1,0 @@
-{"username":"cherry","password":"$2b$10$DZoOtV9/hdOYVVASJBsp7.9AQDchdPC18cB2zfGDwmcqgDnGId9EG","description":"","profilePic":"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQhK9ziWM-LBwChz2Vcejkj4FaGPtrTliNJbQ&s","videos":[]}

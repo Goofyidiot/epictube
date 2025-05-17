@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT PRIMARY KEY,
   password TEXT NOT NULL,
   description TEXT,
-  profilePic TEXT
+  profilePic TEXT,
+  motd TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS videos (

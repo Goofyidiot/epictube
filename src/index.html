@@ -64,6 +64,7 @@
       transition: transform 0.2s;
       cursor: pointer;
       max-width: 320px;
+      min-width: 260px;
       margin: 0 auto;
     }
     .video-card:hover {
@@ -392,11 +393,15 @@
   <nav style="background:#17305c;padding:0.7rem 2rem;display:flex;align-items:center;gap:1.5rem;justify-content:space-between;">
     <div style="display:flex;align-items:center;gap:1.5rem;">
       <a href="/" style="color:#fff;text-decoration:none;font-weight:700;font-size:1.1rem;">Home</a>
-     
     </div>
     <div id="profileNav" style="position:relative;display:flex;align-items:center;gap:0.7rem;"></div>
   </nav>
   <div class="container">
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+      <input id="searchBar" type="text" placeholder="Search channels or videos..." style="flex:1;padding:0.7rem 1rem;border-radius:6px;border:none;font-size:1.1rem;background:#17305c;color:#fff;outline:none;">
+      <button id="searchBtn" style="background:#2196f3;color:#fff;border:none;padding:0.7rem 2rem;border-radius:6px;font-size:1rem;font-weight:700;cursor:pointer;">Search</button>
+    </div>
+    <div id="searchResults" style="display:none;"></div>
     <h2 style="margin-bottom:1rem;">Recommended</h2>
     <div class="video-grid" id="videoGrid"></div>
   </div>
@@ -438,7 +443,9 @@
           <div class="video-info">
             <div class="video-title">${v.title}</div>
             <div class="video-desc">${v.description}</div>
-            <div class="video-owner" style="color:#2196f3;font-size:0.9em;">${v.owner ? 'By: ' + v.owner : ''}</div>
+            <div class="video-owner" style="color:#2196f3;font-size:0.9em;">
+              By: <a href="/channel.html?user=${encodeURIComponent(v.owner)}" style="color:#4cafef;text-decoration:underline;">${v.owner}</a>
+            </div>
             <div class="video-votes" data-id="${v.id}" style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem;"></div>
           </div>
         `;
@@ -585,6 +592,51 @@
 
     // On page load
     fetchVideos();
+
+    // Search logic
+    const searchBar = document.getElementById('searchBar');
+    const searchBtn = document.getElementById('searchBtn');
+    const searchResults = document.getElementById('searchResults');
+    searchBtn.onclick = doSearch;
+    searchBar.onkeydown = e => { if (e.key === 'Enter') doSearch(); };
+    async function doSearch() {
+      const q = searchBar.value.trim();
+      if (!q) { searchResults.style.display = 'none'; return; }
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      let html = '';
+      if (data.channels.length) {
+        html += `<h3 style='color:#2196f3;'>Channels</h3><div style='display:flex;flex-wrap:wrap;gap:1.5rem;margin-bottom:2rem;'>`;
+        data.channels.forEach(c => {
+          html += `<a href="/channel.html?user=${encodeURIComponent(c.username)}" style="background:#17305c;padding:1rem 2rem;border-radius:8px;display:flex;align-items:center;gap:1rem;text-decoration:none;color:#fff;box-shadow:0 2px 8px #0002;min-width:220px;">
+            <img src="${c.profilePic || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(c.username)}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;background:#101a2b;">
+            <div>
+              <div style="font-weight:700;font-size:1.1rem;color:#2196f3;">${c.username}</div>
+              <div style="color:#b3c6e0;font-size:0.95rem;">${c.description || ''}</div>
+              <div style="color:#4cafef;font-size:0.95rem;">${c.motd || ''}</div>
+            </div>
+          </a>`;
+        });
+        html += '</div>';
+      }
+      if (data.videos.length) {
+        html += `<h3 style='color:#2196f3;'>Videos</h3><div class='video-grid'>`;
+        data.videos.forEach(v => {
+          html += `<div class="video-card" onclick="window.openModal ? window.openModal(${v.id}) : window.location='/?video='+${v.id}">
+            <video class="video-thumb" src="${v.url}" preload="metadata"></video>
+            <div class="video-info">
+              <div class="video-title">${v.title}</div>
+              <div class="video-desc">${v.description}</div>
+              <div class="video-owner" style="color:#2196f3;font-size:0.9em;">By: <a href="/channel.html?user=${encodeURIComponent(v.owner)}" style="color:#4cafef;text-decoration:underline;" onclick="event.stopPropagation();">${v.owner}</a></div>
+            </div>
+          </div>`;
+        });
+        html += '</div>';
+      }
+      if (!html) html = `<p style='color:#aaa;'>No results found.</p>`;
+      searchResults.innerHTML = html;
+      searchResults.style.display = '';
+    }
 
     // Modal logic
     const modal = document.getElementById('videoModal');

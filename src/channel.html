@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Channel - EpicTube</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body { background: #101a2b; color: #fff; font-family: 'Roboto', Arial, sans-serif; margin: 0; }
+    .container { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    .channel-header { background: #17305c; border-radius: 10px; padding: 2rem; display: flex; align-items: center; gap: 2rem; box-shadow: 0 2px 8px #0002; }
+    .channel-pic { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; background: #101a2b; }
+    .channel-info { flex: 1; }
+    .channel-username { font-size: 2rem; font-weight: 700; color: #2196f3; margin: 0; }
+    .channel-desc { color: #b3c6e0; margin: 0.5rem 0 1rem 0; }
+    .motd-section { margin-top: 1rem; }
+    .motd-label { color: #2196f3; font-weight: 700; }
+    .motd-text { background: #101a2b; color: #fff; border: none; border-radius: 6px; padding: 0.7rem 1rem; font-size: 1.1rem; margin-top: 0.5rem; width: 100%; }
+    .motd-edit-btn, .motd-save-btn { background: #2196f3; color: #fff; border: none; padding: 0.5rem 1.5rem; border-radius: 5px; font-size: 1rem; font-weight: 700; cursor: pointer; margin-top: 0.5rem; }
+    .motd-edit-btn:hover, .motd-save-btn:hover { background: #1769aa; }
+    .video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 2rem; margin-top: 2rem; }
+    .video-card { background: #17305c; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px #0004; transition: transform 0.2s; cursor: pointer; max-width: 320px; min-width: 260px; margin: 0 auto; }
+    .video-card:hover { transform: translateY(-5px) scale(1.03); box-shadow: 0 4px 16px #2196f366; }
+    .video-thumb { width: 100%; height: 180px; background: #1e2d44; object-fit: cover; display: block; max-width: 320px; margin: 0 auto; }
+    .video-info { padding: 1rem; }
+    .video-title { font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem 0; color: #fff; }
+    .video-desc { color: #b3c6e0; font-size: 0.95rem; margin-bottom: 0.5rem; }
+    .video-owner { color: #2196f3; font-size: 0.9em; }
+    @media (max-width: 700px) { .container { padding: 0 0.5rem; } .channel-header { flex-direction: column; align-items: flex-start; } .channel-pic { width: 70px; height: 70px; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="channel-header">
+      <img id="channelPic" class="channel-pic" src="" alt="Profile Picture">
+      <div class="channel-info">
+        <h1 id="channelUsername" class="channel-username"></h1>
+        <div id="channelDesc" class="channel-desc"></div>
+        <div class="motd-section">
+          <div class="motd-label">Message of the Day:</div>
+          <div id="motdDisplay" class="motd-text"></div>
+          <textarea id="motdEdit" class="motd-text" style="display:none;"></textarea>
+          <button id="motdEditBtn" class="motd-edit-btn" style="display:none;">Edit MOTD</button>
+          <button id="motdSaveBtn" class="motd-save-btn" style="display:none;">Save</button>
+        </div>
+      </div>
+    </div>
+    <h2 style="margin:2rem 0 1rem 0;">Channel Videos</h2>
+    <div class="video-grid" id="videoGrid"></div>
+  </div>
+  <script>
+    // Get channel username from URL
+    const params = new URLSearchParams(window.location.search);
+    const username = params.get('user');
+    if (!username) { document.body.innerHTML = '<h2 style="color:#e53935;text-align:center;">No channel specified.</h2>'; throw new Error('No channel'); }
+
+    let isOwner = false;
+    let channelData = null;
+
+    async function getMe() {
+      try {
+        const res = await fetch('/api/me');
+        if (!res.ok) return null;
+        return await res.json();
+      } catch { return null; }
+    }
+
+    async function fetchChannel() {
+      const res = await fetch(`/api/channel/${encodeURIComponent(username)}`);
+      if (!res.ok) {
+        document.body.innerHTML = '<h2 style="color:#e53935;text-align:center;">Channel not found.</h2>';
+        return;
+      }
+      channelData = await res.json();
+      renderChannel();
+    }
+
+    async function renderChannel() {
+      const { user, videos } = channelData;
+      document.getElementById('channelPic').src = user.profilePic || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.username);
+      document.getElementById('channelUsername').textContent = user.username;
+      document.getElementById('channelDesc').textContent = user.description || '';
+      document.getElementById('motdDisplay').textContent = user.motd || '';
+      // Check if current user is owner
+      const me = await getMe();
+      isOwner = me && me.username === user.username;
+      document.getElementById('motdEditBtn').style.display = isOwner ? '' : 'none';
+      // Render videos
+      const grid = document.getElementById('videoGrid');
+      grid.innerHTML = '';
+      videos.forEach(v => {
+        const card = document.createElement('div');
+        card.className = 'video-card';
+        card.onclick = () => { window.location = '/?video=' + v.id; };
+        card.innerHTML = `
+          <video class="video-thumb" src="${v.url}" preload="metadata"></video>
+          <div class="video-info">
+            <div class="video-title">${v.title}</div>
+            <div class="video-desc">${v.description}</div>
+            <div class="video-owner">By: ${v.owner}</div>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    // MOTD edit logic
+    document.getElementById('motdEditBtn').onclick = () => {
+      document.getElementById('motdEdit').value = channelData.user.motd || '';
+      document.getElementById('motdDisplay').style.display = 'none';
+      document.getElementById('motdEdit').style.display = '';
+      document.getElementById('motdEditBtn').style.display = 'none';
+      document.getElementById('motdSaveBtn').style.display = '';
+    };
+    document.getElementById('motdSaveBtn').onclick = async () => {
+      const newMotd = document.getElementById('motdEdit').value;
+      await fetch(`/api/channel/${encodeURIComponent(username)}/motd`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ motd: newMotd })
+      });
+      channelData.user.motd = newMotd;
+      document.getElementById('motdDisplay').textContent = newMotd;
+      document.getElementById('motdDisplay').style.display = '';
+      document.getElementById('motdEdit').style.display = 'none';
+      document.getElementById('motdEditBtn').style.display = '';
+      document.getElementById('motdSaveBtn').style.display = 'none';
+    };
+
+    fetchChannel();
+  </script>
+</body>
+</html>

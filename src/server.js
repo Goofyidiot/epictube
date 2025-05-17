@@ -113,20 +113,18 @@ app.post('/api/me', uploadProfilePic.single('profilePicFile'), (req, res) => {
 app.post('/api/delete-account', (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
   const username = req.session.user;
-  // Delete user's videos
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  user.videos.forEach(id => {
-    const vfile = path.join(DATA_DIR, id + '.txt');
-    const vdata = fs.existsSync(vfile) ? JSON.parse(fs.readFileSync(vfile, 'utf-8')) : null;
-    if (vdata && vdata.filename) {
-      const vpath = path.join(VIDEOS_DIR, vdata.filename);
-      if (fs.existsSync(vpath)) fs.unlinkSync(vpath);
-    }
-    if (fs.existsSync(vfile)) fs.unlinkSync(vfile);
-    const cfile = path.join(COMMENTS_DIR, id + '.txt');
-    if (fs.existsSync(cfile)) fs.unlinkSync(cfile);
-    const vvotes = path.join(DATA_DIR, id + '.votes.txt');
-    if (fs.existsSync(vvotes)) fs.unlinkSync(vvotes);
+  // Find all videos owned by the user in SQLite
+  const userVideos = db.prepare('SELECT * FROM videos WHERE owner = ?').all(username);
+  userVideos.forEach(video => {
+    // Remove video file
+    const vpath = path.join(VIDEOS_DIR, video.filename);
+    if (fs.existsSync(vpath)) fs.unlinkSync(vpath);
+    // Remove video metadata
+    db.prepare('DELETE FROM videos WHERE id = ?').run(video.id);
+    // Remove comments
+    db.prepare('DELETE FROM comments WHERE videoId = ?').run(video.id);
+    // Remove votes
+    db.prepare('DELETE FROM votes WHERE videoId = ?').run(video.id);
   });
   // Delete user from database
   db.prepare('DELETE FROM users WHERE username = ?').run(username);
@@ -149,6 +147,9 @@ app.get('/api/videos/:id', (req, res) => {
 // Upload video (authenticated)
 app.post('/api/upload', upload.single('video'), (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
+  // Check if user exists in the database
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(req.session.user);
+  if (!user) return res.status(403).json({ error: 'User not found in database' });
   const { title, description } = req.body;
   if (!req.file) return res.status(400).json({ error: 'No video file uploaded' });
   const stmt = db.prepare('INSERT INTO videos (title, description, filename, url, owner) VALUES (?, ?, ?, ?, ?)');
@@ -160,39 +161,33 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 // Delete video (authenticated, owner only)
 app.post('/api/videos/:id/delete', (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
-  const file = path.join(DATA_DIR, req.params.id + '.txt');
-  if (!fs.existsSync(file)) return res.status(404).json({ error: 'Video not found' });
-  const video = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  // Fetch video from SQLite
+  const video = db.prepare('SELECT * FROM videos WHERE id = ?').get(req.params.id);
+  if (!video) return res.status(404).json({ error: 'Video not found' });
   if (video.owner !== req.session.user) return res.status(403).json({ error: 'Not your video' });
   // Remove video file
   const vpath = path.join(VIDEOS_DIR, video.filename);
   if (fs.existsSync(vpath)) fs.unlinkSync(vpath);
-  // Remove video metadata
-  fs.unlinkSync(file);
-  // Remove from user's list
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(req.session.user);
-  user.videos = user.videos.filter(id => id !== req.params.id);
-  db.prepare('UPDATE users SET videos = ? WHERE username = ?')
-    .run(JSON.stringify(user.videos), req.session.user);
-  // Remove comments
-  const cfile = path.join(COMMENTS_DIR, req.params.id + '.txt');
-  if (fs.existsSync(cfile)) fs.unlinkSync(cfile);
-  // Remove votes
-  const vvotes = path.join(DATA_DIR, req.params.id + '.votes.txt');
-  if (fs.existsSync(vvotes)) fs.unlinkSync(vvotes);
+  // Remove video metadata from SQLite
+  db.prepare('DELETE FROM videos WHERE id = ?').run(req.params.id);
+  // Remove comments from SQLite
+  db.prepare('DELETE FROM comments WHERE videoId = ?').run(req.params.id);
+  // Remove votes from SQLite
+  db.prepare('DELETE FROM votes WHERE videoId = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
 // Edit video (authenticated, owner only)
 app.post('/api/videos/:id/edit', (req, res) => {
   if (!req.session.user) return res.status(401).json({ error: 'Not logged in' });
-  const file = path.join(DATA_DIR, req.params.id + '.txt');
-  if (!fs.existsSync(file)) return res.status(404).json({ error: 'Video not found' });
-  const video = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  // Fetch video from SQLite
+  const video = db.prepare('SELECT * FROM videos WHERE id = ?').get(req.params.id);
+  if (!video) return res.status(404).json({ error: 'Video not found' });
   if (video.owner !== req.session.user) return res.status(403).json({ error: 'Not your video' });
-  video.title = req.body.title || video.title;
-  video.description = req.body.description || video.description;
-  fs.writeFileSync(file, JSON.stringify(video));
+  const newTitle = req.body.title || video.title;
+  const newDescription = req.body.description || video.description;
+  db.prepare('UPDATE videos SET title = ?, description = ? WHERE id = ?')
+    .run(newTitle, newDescription, req.params.id);
   res.json({ ok: true });
 });
 
@@ -251,6 +246,32 @@ app.post('/api/videos/:id/votes', (req, res) => {
     if (req.session.user && v.user === req.session.user) userVote = v.vote;
   }
   res.json({ score, userVote });
+});
+
+// Get channel info and videos for a user
+app.get('/api/channel/:username', (req, res) => {
+  const user = db.prepare('SELECT username, description, profilePic, motd FROM users WHERE username = ?').get(req.params.username);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const videos = db.prepare('SELECT *, (SELECT IFNULL(SUM(vote),0) FROM votes WHERE videoId = videos.id) as score FROM videos WHERE owner = ? ORDER BY id DESC').all(req.params.username);
+  res.json({ user, videos });
+});
+
+// Update channel message of the day (MOTD) (owner only)
+app.post('/api/channel/:username/motd', (req, res) => {
+  if (!req.session.user || req.session.user !== req.params.username) return res.status(403).json({ error: 'Not allowed' });
+  db.prepare('UPDATE users SET motd = ? WHERE username = ?').run(req.body.motd || '', req.params.username);
+  res.json({ ok: true });
+});
+
+// Search videos and channels
+app.get('/api/search', (req, res) => {
+  const q = (req.query.q || '').toLowerCase();
+  if (!q) return res.json({ videos: [], channels: [] });
+  // Search videos by title or description
+  const videos = db.prepare('SELECT *, (SELECT IFNULL(SUM(vote),0) FROM votes WHERE videoId = videos.id) as score FROM videos WHERE LOWER(title) LIKE ? OR LOWER(description) LIKE ? ORDER BY id DESC').all(`%${q}%`, `%${q}%`);
+  // Search channels by username or description
+  const channels = db.prepare('SELECT username, description, profilePic, motd FROM users WHERE LOWER(username) LIKE ? OR LOWER(description) LIKE ? ORDER BY username ASC').all(`%${q}%`, `%${q}%`);
+  res.json({ videos, channels });
 });
 
 // Serve index.html for root
